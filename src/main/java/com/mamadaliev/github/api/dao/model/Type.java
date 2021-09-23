@@ -1,4 +1,4 @@
-package com.mamadaliev.github.api.dto;
+package com.mamadaliev.github.api.dao.model;
 
 import lombok.Getter;
 

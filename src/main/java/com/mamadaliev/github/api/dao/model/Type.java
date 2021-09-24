@@ -4,7 +4,8 @@ import lombok.Getter;
 
 @Getter
 public enum Type {
-    USER("user");
+    USER("User"),
+    ORGANIZATION("Organization");
 
     private final String name;
 

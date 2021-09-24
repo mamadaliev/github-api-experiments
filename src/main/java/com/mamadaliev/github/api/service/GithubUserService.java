@@ -12,4 +12,6 @@ public interface GithubUserService {
     User retrieve(String login);
 
     long retrieveFollowersCount(String login);
+
+    void retrieveInThreads(long from, long to, long count);
 }

@@ -5,6 +5,7 @@ services:
     container_name: mongo-service
     image: mongo:latest
     restart: always
+    user: root
     networks:
       - net
     volumes:

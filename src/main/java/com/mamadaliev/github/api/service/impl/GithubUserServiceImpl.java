@@ -7,17 +7,17 @@ import com.mamadaliev.github.api.service.GithubUserService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
-import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
-import static com.mamadaliev.github.api.helper.EndpointHelper.GITHUB_AUTHORIZATION;
-import static com.mamadaliev.github.api.helper.EndpointHelper.GITHUB_USERS;
+import static com.mamadaliev.github.api.helper.EndpointHelper.*;
 
 @Slf4j
 @Service
@@ -29,62 +29,6 @@ public class GithubUserServiceImpl implements GithubUserService {
     private final ModelMapper modelMapper;
 
     @Override
-    public List<UserDto> retrieveAll(@DefaultValue("0") String since,
-                                     @DefaultValue("100") String perPage) {
-        Map<String, String> parameters = new HashMap<>();
-        parameters.put("accept", "application/vnd.github.v3+json");
-        parameters.put("since", since);
-        parameters.put("per_page", perPage);
-
-        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(GITHUB_USERS);
-        for (Map.Entry<String, String> entry : parameters.entrySet()) {
-            builder.queryParam(entry.getKey(), entry.getValue());
-        }
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Accept", "application/json");
-        headers.set("Authorization", GITHUB_AUTHORIZATION);
-
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        ResponseEntity<UserDto[]> response = restTemplate.exchange(
-                builder.toUriString(),
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                UserDto[].class,
-                Map.of("since", since),
-                Map.of("per_page", perPage),
-                Map.of("accept", "application/vnd.github.v3+json"));
-
-        if (response.getStatusCode() != HttpStatus.OK || Objects.requireNonNull(response.getBody()).length == 0) {
-            return null;
-        }
-
-        var userStore = new LinkedList<>(Arrays.asList(response.getBody()));
-
-        log.info("{}", userStore);
-
-        List<User> users = userStore.stream()
-                .map(user -> modelMapper.map(user, User.class))
-                .collect(Collectors.toList());
-
-        userRepository.saveAll(users);
-
-        var lastUserId = String.valueOf(userStore.getLast().getId());
-        var result = retrieveAll(lastUserId, perPage);
-        var resultStore = new ArrayList<UserDto>();
-
-        if (Objects.nonNull(result)) {
-            resultStore.addAll(result);
-        }
-        return resultStore;
-    }
-
-    @Override
     public User retrieve(String login) {
         return null;
     }
@@ -94,14 +38,29 @@ public class GithubUserServiceImpl implements GithubUserService {
         return 0;
     }
 
+    // 5000 requests per 1 hour
     @Override
-    public void retrieveInThreads(long from, long to, long count) {
-        retrieve(from, to, count);
+    public void retrieveAll(long from, long to, long count) {
+        ExecutorService executor = Executors.newFixedThreadPool(5);
+
+        int number = 300_000;
+
+        long x1 = from + number;
+        long x2 = from + number + number;
+        long x3 = from + number + number + number;
+        long x4 = from + number + number + number + number;
+        long x5 = from + number + number + number + number + number;
+
+        executor.submit(() -> retrieve(from, x1, count, TOKENS.get(0)));
+        executor.submit(() -> retrieve(x1, x2, count, TOKENS.get(1)));
+        executor.submit(() -> retrieve(x2, x3, count, TOKENS.get(2)));
+        executor.submit(() -> retrieve(x3, x4, count, TOKENS.get(3)));
+        executor.submit(() -> retrieve(x4, x5, count, TOKENS.get(4)));
     }
 
-    private List<UserDto> retrieve(long from, long to, long count) {
+    private void retrieve(long from, long to, long count, String token) {
         if (from + count - 1 >= to) {
-            return null;
+            return;
         }
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("accept", "application/vnd.github.v3+json");
@@ -115,7 +74,7 @@ public class GithubUserServiceImpl implements GithubUserService {
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("Accept", "application/json");
-        headers.set("Authorization", GITHUB_AUTHORIZATION);
+        headers.set("Authorization", token);
 
         ResponseEntity<UserDto[]> response = restTemplate.exchange(
                 builder.toUriString(),
@@ -127,20 +86,18 @@ public class GithubUserServiceImpl implements GithubUserService {
                 Map.of("accept", "application/vnd.github.v3+json"));
 
         if (response.getStatusCode() != HttpStatus.OK || Objects.requireNonNull(response.getBody()).length == 0) {
-            return null;
+            return;
         }
 
         var userStore = new LinkedList<>(Arrays.asList(response.getBody()));
 
-        log.info("{}", userStore);
-
-        List<User> users = userStore.stream()
+        userRepository.saveAll(userStore.stream()
                 .map(user -> modelMapper.map(user, User.class))
-                .collect(Collectors.toList());
-
-        userRepository.saveAll(users);
-
+//                .peek(user -> log.info("{}: {}", user.getId(), user.getLogin()))
+//                .filter(user -> !userRepository.existsByLogin(user.getLogin()))
+                .collect(Collectors.toList()));
         var fromUserId = userStore.getLast().getId();
-        return retrieve(fromUserId, to, count);
+        log.info("thread={}, userId={}", Thread.currentThread().getName(), fromUserId);
+        retrieve(fromUserId, to, count, token);
     }
 }
